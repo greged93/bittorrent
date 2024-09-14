@@ -22,6 +22,7 @@ pub struct Decoder<'a> {
 }
 
 impl<'a> Decoder<'a> {
+    /// Returns an [`Decoder`]
     pub fn new(input: &'a str) -> Self {
         Self {
             full: input,
@@ -29,7 +30,6 @@ impl<'a> Decoder<'a> {
         }
     }
 
-    // TODO: add miette here instead of Option
     /// BenDecode the provided str and advance by the amount of
     /// tokens found.
     pub fn decode(&mut self) -> Result<Value> {
