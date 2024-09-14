@@ -1,5 +1,5 @@
 use miette::{miette, LabeledSpan, Result};
-use serde_json::{Number, Value};
+use serde_json::{Map, Number, Value};
 use std::str::FromStr;
 
 #[macro_export]
@@ -36,24 +36,29 @@ impl<'a> Decoder<'a> {
         let mut chars = self.cursor.chars().peekable();
         let peeked = chars.peek().ok_or(miette!("EOF"))?;
         match peeked {
+            'd' => {
+                self.advance_one();
+                let mut map = Map::new();
+                while let Ok(key) = self.decode() {
+                    let value = self.decode()?;
+                    let key = key
+                        .as_str()
+                        .ok_or(miette!("expected string as key"))?
+                        .to_string();
+                    map.insert(key, value);
+                }
+                self.assert_next_terminator()?;
+                self.advance_one();
+                Ok(Value::Object(map))
+            }
             'l' => {
-                // Start recursion
-                self.cursor = &self.cursor[1..];
+                self.advance_one();
                 let mut values = vec![];
                 while let Ok(decoded) = self.decode() {
                     values.push(decoded);
                 }
-                if !self.cursor.starts_with('e') {
-                    return Err(miette!(
-                        labels = vec![LabeledSpan::at_offset(
-                            self.full.len() - self.cursor.len() - 1,
-                            "here"
-                        )],
-                        "expected closing e",
-                    )
-                    .with_source_code(self.full.to_string()));
-                }
-                self.cursor = &self.cursor[1..];
+                self.assert_next_terminator()?;
+                self.advance_one();
                 let arr = Value::Array(values);
                 Ok(arr)
             }
@@ -69,7 +74,7 @@ impl<'a> Decoder<'a> {
                     .with_source_code(self.full.to_string()),
                 )?;
                 let string = &self.cursor[1..delimiter_pos];
-                self.cursor = &self.cursor[delimiter_pos + 1..];
+                self.advance_n(delimiter_pos + 1);
                 Ok(Value::Number(
                     Number::from_str(string).map_err(|_| miette!("cannot convert to number"))?,
                 ))
@@ -90,8 +95,7 @@ impl<'a> Decoder<'a> {
                     .map_err(|_| miette!("cannot convert to string"))?;
                 let string = &self.cursor[delimiter_pos + 1..delimiter_pos + 1 + string_len];
 
-                self.cursor = &self.cursor[delimiter_pos + 1 + string_len..];
-
+                self.advance_n(delimiter_pos + 1 + string_len);
                 Ok(Value::String(string.to_string()))
             }
             'e' => {
@@ -100,6 +104,31 @@ impl<'a> Decoder<'a> {
             }
             _ => unimplemented!("not implemented yet"),
         }
+    }
+
+    /// Returns an error if the char at the cursor isn't an 'e'.
+    fn assert_next_terminator(&mut self) -> Result<()> {
+        if !self.cursor.starts_with('e') {
+            return Err(miette!(
+                labels = vec![LabeledSpan::at_offset(
+                    self.full.len() - self.cursor.len() - 1,
+                    "here"
+                )],
+                "expected closing e",
+            )
+            .with_source_code(self.full.to_string()));
+        }
+        Ok(())
+    }
+
+    /// Advance the cursor by one.
+    fn advance_one(&mut self) {
+        self.cursor = &self.cursor[1..];
+    }
+
+    /// Advance the cursor by the provided n value.
+    fn advance_n(&mut self, n: usize) {
+        self.cursor = &self.cursor[n..];
     }
 }
 
@@ -171,6 +200,24 @@ mod tests {
         assert_eq!(
             value,
             Value::Array(vec![Value::Array(vec![value!(4)]), value!(5)])
+        );
+        assert_eq!(decoder.cursor, "");
+    }
+
+    #[test]
+    fn test_parse_map_simple() {
+        // Test str
+        let mut decoder = Decoder::new("d3:foo3:bar5:helloi52ee");
+
+        // Start the decoder
+        let value = decoder.decode().unwrap();
+
+        // Check the result and the str left in the decoder
+        assert_eq!(
+            value,
+            Value::Object(Map::from_iter(
+                [("foo".into(), value!("bar")), ("hello".into(), value!(52))].into_iter()
+            ))
         );
         assert_eq!(decoder.cursor, "");
     }
