@@ -20,6 +20,14 @@ impl<'a> Iterator for BenDecoder<'a> {
         let mut chars = self.input.chars().peekable();
         let peeked = chars.peek()?;
         match peeked {
+            'l' => {
+                let delimiter_pos = self.input.rfind('e')?;
+                let string = &self.input[1..delimiter_pos];
+                self.input = &self.input[delimiter_pos + 1..];
+                // Start recursion
+                let mut decoder = BenDecoder::new(string);
+                Some(Value::Array(decoder.collect()))
+            }
             'i' => {
                 let delimiter_pos = self.input.find('e')?;
                 let string = &self.input[1..delimiter_pos];
@@ -75,6 +83,28 @@ mod tests {
         assert_eq!(
             result,
             Some(Value::Number(Number::from_str("563").unwrap()))
+        );
+        assert_eq!(decoder.input, "");
+    }
+
+    #[test]
+    fn test_parse_list() {
+        // Test str
+        let input = "l5:helloi52ee";
+
+        // Start the decoder
+        let mut decoder = BenDecoder::new(input);
+
+        // Advance the decoder
+        let result = decoder.next();
+
+        // Check the result and the str left in the decoder
+        assert_eq!(
+            result,
+            Some(Value::Array(vec![
+                Value::String("hello".into()),
+                Value::Number(Number::from_str("52").unwrap())
+            ]))
         );
         assert_eq!(decoder.input, "");
     }
