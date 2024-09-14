@@ -1,3 +1,6 @@
+use serde_json::{Number, Value};
+use std::str::FromStr;
+
 pub struct BenDecoder<'a> {
     input: &'a str,
 }
@@ -11,7 +14,7 @@ impl<'a> BenDecoder<'a> {
 }
 
 impl<'a> Iterator for BenDecoder<'a> {
-    type Item = &'a str;
+    type Item = Value;
 
     fn next(&mut self) -> Option<Self::Item> {
         let mut chars = self.input.chars().peekable();
@@ -21,7 +24,7 @@ impl<'a> Iterator for BenDecoder<'a> {
                 let delimiter_pos = self.input.find('e')?;
                 let string = &self.input[1..delimiter_pos];
                 self.input = &self.input[delimiter_pos + 1..];
-                Some(string)
+                Some(Value::Number(Number::from_str(string).ok()?))
             }
             c if c.is_ascii_digit() => {
                 let delimiter_pos = self.input.find(':')?;
@@ -30,7 +33,7 @@ impl<'a> Iterator for BenDecoder<'a> {
 
                 self.input = &self.input[delimiter_pos + 1 + string_len..];
 
-                Some(string)
+                Some(Value::String(string.to_string()))
             }
             _ => unimplemented!("not implemented yet"),
         }
@@ -39,7 +42,7 @@ impl<'a> Iterator for BenDecoder<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::decoder::BenDecoder;
+    use super::*;
 
     #[test]
     fn test_parse_string() {
@@ -53,7 +56,7 @@ mod tests {
         let result = decoder.next();
 
         // Check the result and the str left in the decoder
-        assert_eq!(result, Some("hello"));
+        assert_eq!(result, Some(Value::String("hello".into())));
         assert_eq!(decoder.input, "");
     }
 
@@ -69,7 +72,10 @@ mod tests {
         let result = decoder.next();
 
         // Check the result and the str left in the decoder
-        assert_eq!(result, Some("563"));
+        assert_eq!(
+            result,
+            Some(Value::Number(Number::from_str("563").unwrap()))
+        );
         assert_eq!(decoder.input, "");
     }
 }
