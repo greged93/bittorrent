@@ -1,7 +1,7 @@
-mod decoder;
+mod decode;
 
-use crate::decoder::BenDecoder;
 use clap::{Parser, Subcommand};
+use decode::decode;
 
 #[derive(Parser)]
 pub struct Cli {
@@ -20,8 +20,7 @@ fn main() {
     match command.command {
         Command::Decode { input } => {
             // Uncomment this block to pass the first stage
-            let mut decoder = BenDecoder::new(&input);
-            let value = decoder.next().expect("expected value");
+            let value = decode(&mut input.as_str()).expect("expected value");
             println!("{}", value);
         }
     }
