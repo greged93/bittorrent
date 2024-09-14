@@ -1,3 +1,4 @@
+use miette::{miette, LabeledSpan, Result};
 use serde_json::{Number, Value};
 use std::str::FromStr;
 
@@ -15,45 +16,90 @@ macro_rules! value {
     }};
 }
 
-// TODO: add miette here instead of Option
-/// BenDecode the provided str and advance by the amount of
-/// tokens found.
-pub fn decode(input: &mut &str) -> Option<Value> {
-    let mut chars = input.chars().peekable();
-    let peeked = chars.peek()?;
-    match peeked {
-        'l' => {
-            // Start recursion
-            *input = &input[1..];
-            let mut values = vec![];
-            while let Some(decoded) = decode(input) {
-                values.push(decoded);
+pub struct Decoder<'a> {
+    full: &'a str,
+    cursor: &'a str,
+}
+
+impl<'a> Decoder<'a> {
+    pub fn new(input: &'a str) -> Self {
+        Self {
+            full: input,
+            cursor: input,
+        }
+    }
+
+    // TODO: add miette here instead of Option
+    /// BenDecode the provided str and advance by the amount of
+    /// tokens found.
+    pub fn decode(&mut self) -> Result<Value> {
+        let mut chars = self.cursor.chars().peekable();
+        let peeked = chars.peek().ok_or(miette!("EOF"))?;
+        match peeked {
+            'l' => {
+                // Start recursion
+                self.cursor = &self.cursor[1..];
+                let mut values = vec![];
+                while let Ok(decoded) = self.decode() {
+                    values.push(decoded);
+                }
+                if !self.cursor.starts_with('e') {
+                    return Err(miette!(
+                        labels = vec![LabeledSpan::at_offset(
+                            self.full.len() - self.cursor.len() - 1,
+                            "here"
+                        )],
+                        "expected closing e",
+                    )
+                    .with_source_code(self.full.to_string()));
+                }
+                self.cursor = &self.cursor[1..];
+                let arr = Value::Array(values);
+                Ok(arr)
             }
-            let arr = Value::Array(values);
-            Some(arr)
-        }
-        'i' => {
-            let delimiter_pos = input.find('e')?;
-            let string = &input[1..delimiter_pos];
-            *input = &input[delimiter_pos + 1..];
-            Some(Value::Number(Number::from_str(string).ok()?))
-        }
-        c if c.is_ascii_digit() => {
-            let delimiter_pos = input.find(':')?;
-            let string_len = input[..delimiter_pos].parse::<usize>().ok()?;
-            let string = &input[delimiter_pos + 1..delimiter_pos + 1 + string_len];
+            'i' => {
+                let delimiter_pos = self.cursor.find('e').ok_or(
+                    miette!(
+                        labels = vec![LabeledSpan::at_offset(
+                            self.full.len() - self.cursor.len(),
+                            "here"
+                        )],
+                        "expected closing e",
+                    )
+                    .with_source_code(self.full.to_string()),
+                )?;
+                let string = &self.cursor[1..delimiter_pos];
+                self.cursor = &self.cursor[delimiter_pos + 1..];
+                Ok(Value::Number(
+                    Number::from_str(string).map_err(|_| miette!("cannot convert to number"))?,
+                ))
+            }
+            c if c.is_ascii_digit() => {
+                let delimiter_pos = self.cursor.find(':').ok_or(
+                    miette!(
+                        labels = vec![LabeledSpan::at_offset(
+                            self.full.len() - self.cursor.len(),
+                            "here"
+                        )],
+                        "expected closing :",
+                    )
+                    .with_source_code(self.full.to_string()),
+                )?;
+                let string_len = self.cursor[..delimiter_pos]
+                    .parse::<usize>()
+                    .map_err(|_| miette!("cannot convert to string"))?;
+                let string = &self.cursor[delimiter_pos + 1..delimiter_pos + 1 + string_len];
 
-            *input = &input[delimiter_pos + 1 + string_len..];
+                self.cursor = &self.cursor[delimiter_pos + 1 + string_len..];
 
-            Some(Value::String(string.to_string()))
+                Ok(Value::String(string.to_string()))
+            }
+            'e' => {
+                // This is a terminating char
+                Err(miette!("terminator"))
+            }
+            _ => unimplemented!("not implemented yet"),
         }
-        'e' => {
-            // Skip the 'e'
-            *input = &input[1..];
-            eprintln!("{}", input);
-            None
-        }
-        _ => unimplemented!("not implemented yet"),
     }
 }
 
@@ -64,68 +110,68 @@ mod tests {
     #[test]
     fn test_parse_string() {
         // Test str
-        let mut input = "5:hello";
+        let mut decoder = Decoder::new("5:hello");
 
         // Start the decoder
-        let value = decode(&mut input).unwrap();
+        let value = decoder.decode().unwrap();
 
         // Check the result and the str left in the decoder
         assert_eq!(value, value!("hello"));
-        assert_eq!(input, "");
+        assert_eq!(decoder.cursor, "");
     }
 
     #[test]
     fn test_parse_number() {
         // Test str
-        let mut input = "i563e";
+        let mut decoder = Decoder::new("i563e");
 
         // Start the decoder
-        let value = decode(&mut input).unwrap();
+        let value = decoder.decode().unwrap();
 
         // Check the result and the str left in the decoder
         assert_eq!(value, value!(563));
-        assert_eq!(input, "");
+        assert_eq!(decoder.cursor, "");
     }
 
     #[test]
     fn test_parse_empty_list() {
         // Test str
-        let mut input = "le";
+        let mut decoder = Decoder::new("le");
 
         // Start the decoder
-        let value = decode(&mut input).unwrap();
+        let value = decoder.decode().unwrap();
 
         // Check the result and the str left in the decoder
         assert_eq!(value, Value::Array(vec![]));
-        assert_eq!(input, "");
+        assert_eq!(decoder.cursor, "");
     }
 
     #[test]
     fn test_parse_list_simple() {
         // Test str
-        let mut input = "l5:helloi52ee";
+        let mut decoder = Decoder::new("l5:helloi52ee");
 
         // Start the decoder
-        let value = decode(&mut input).unwrap();
+        let value = decoder.decode().unwrap();
 
         // Check the result and the str left in the decoder
         assert_eq!(value, Value::Array(vec![value!("hello"), value!(52)]));
-        assert_eq!(input, "");
+        assert_eq!(decoder.cursor, "");
     }
 
     #[test]
     fn test_parse_list_complex() {
         // Test str
-        let mut input = "lli4eei5ee";
+        let mut decoder = Decoder::new("lli4eei5ee");
 
         // Start the decoder
-        let value = decode(&mut input).unwrap();
+        let value = decoder.decode().unwrap();
 
         // Check the result and the str left in the decoder
         assert_eq!(
             value,
             Value::Array(vec![Value::Array(vec![value!(4)]), value!(5)])
         );
-        assert_eq!(input, "");
+        assert_eq!(decoder.cursor, "");
     }
 }

@@ -1,7 +1,7 @@
 mod decode;
 
 use clap::{Parser, Subcommand};
-use decode::decode;
+use decode::Decoder;
 
 #[derive(Parser)]
 pub struct Cli {
@@ -20,7 +20,8 @@ fn main() {
     match command.command {
         Command::Decode { input } => {
             // Uncomment this block to pass the first stage
-            let value = decode(&mut input.as_str()).expect("expected value");
+            let mut decoder = Decoder::new(&input);
+            let value = decoder.decode().expect("expected value");
             println!("{}", value);
         }
     }
