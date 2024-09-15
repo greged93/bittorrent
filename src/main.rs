@@ -14,7 +14,7 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
-    Decode { input: Vec<u8> },
+    Decode { input: String },
     Info { path: PathBuf },
 }
 
@@ -23,7 +23,7 @@ fn main() {
     let command = Cli::parse();
     match command.command {
         Command::Decode { input } => {
-            let mut decoder = Decoder::new(&input);
+            let mut decoder = Decoder::new(input.as_bytes());
             let value = decoder.decode().expect("expected value");
             println!("{}", value);
         }

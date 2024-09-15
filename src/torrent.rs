@@ -1,5 +1,4 @@
 use miette::miette;
-use serde::Serializer;
 use serde_json::{Map, Value};
 use std::fmt::{Display, Formatter};
 
