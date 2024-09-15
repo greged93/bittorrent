@@ -1,7 +1,8 @@
 mod decode;
+mod peers;
 mod torrent;
-mod utils;
 
+use crate::peers::Peers;
 use crate::torrent::Torrent;
 use clap::{Parser, Subcommand};
 use decode::Decoder;
@@ -61,11 +62,11 @@ async fn main() {
 
             let res = reqwest::get(url).await.expect("failed to get peers");
             let raw_res = res.bytes().await.expect("missing text");
-            println!("{:?}", raw_res);
 
             let mut decoder = Decoder::new(raw_res.as_ref());
             let res = decoder.decode().expect("failed to decode answer");
-            println!("{}", res);
+            let peers: Peers = res.try_into().expect("failed to convert value to peers");
+            println!("{}", peers);
         }
     }
 }
