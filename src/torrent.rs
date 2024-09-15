@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use miette::miette;
 use serde_json::{Map, Value};
 use sha1::{Digest, Sha1};
@@ -12,7 +13,8 @@ pub struct Info {
     length: usize,
     name: String,
     piece_length: usize,
-    pieces: Vec<u8>,
+    pieces_raw: Vec<u8>,
+    pieces: String,
 }
 
 impl Info {
@@ -37,7 +39,7 @@ impl Info {
         );
         let mut encoded = info.as_bytes().to_vec();
         // extend the slice with the pieces
-        encoded.extend(self.pieces.clone());
+        encoded.extend(self.pieces_raw.clone());
         // extend the slice with the terminating e
         encoded.extend(b"e");
         encoded
@@ -78,7 +80,8 @@ impl TryFrom<Value> for Torrent {
         let name = as_str(info, "name")?;
         // Reconstruct pieces from the hex string
         // by taking 2 chars and converting them to a byte
-        let pieces = as_str(info, "pieces")?
+        let pieces = as_str(info, "pieces")?;
+        let pieces_raw = pieces
             .as_bytes()
             .chunks(2)
             .filter_map(|x| {
@@ -92,6 +95,7 @@ impl TryFrom<Value> for Torrent {
             announce,
             info: Info {
                 name,
+                pieces_raw,
                 pieces,
                 piece_length,
                 length,
@@ -102,12 +106,22 @@ impl TryFrom<Value> for Torrent {
 
 impl Display for Torrent {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let pieces = self
+            .info
+            .pieces
+            .chars()
+            .chunks(40)
+            .into_iter()
+            .map(|x| x.collect::<String>().to_lowercase())
+            .join("\n");
         write!(
             f,
-            "Tracker URL: {}\nLength: {}\nInfo Hash: {}",
+            "Tracker URL: {}\nLength: {}\nInfo Hash: {}\nPiece Length: {}\nPiece Hashes:\n{}",
             self.announce,
             self.info.length,
-            hex::encode(self.info.hash())
+            hex::encode(self.info.hash()),
+            self.info.piece_length,
+            pieces
         )
     }
 }

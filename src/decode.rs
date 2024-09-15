@@ -36,6 +36,7 @@ impl<'a> Decoder<'a> {
     pub fn decode(&mut self) -> Result<Value> {
         let peeked = self.cursor.first();
         match peeked {
+            // Parsed the start of a map
             Some(b'd') => {
                 self.advance_one();
                 let mut map = Map::new();
@@ -51,6 +52,7 @@ impl<'a> Decoder<'a> {
                 self.advance_one();
                 Ok(Value::Object(map))
             }
+            // Parsed the start of a list
             Some(b'l') => {
                 self.advance_one();
                 let mut values = vec![];
@@ -62,6 +64,7 @@ impl<'a> Decoder<'a> {
                 let arr = Value::Array(values);
                 Ok(arr)
             }
+            // Parse the start of a number
             Some(b'i') => {
                 let delimiter_pos = self.cursor.iter().position(|x| x == &b'e').ok_or(
                     miette!(
@@ -80,6 +83,7 @@ impl<'a> Decoder<'a> {
                         .map_err(|_| miette!("cannot convert to number"))?,
                 ))
             }
+            // Parsed the start of a string
             Some(c) if c.is_ascii_digit() => {
                 let delimiter_pos = self.cursor.iter().position(|x| x == &b':').ok_or(
                     miette!(
@@ -109,6 +113,7 @@ impl<'a> Decoder<'a> {
                     Ok(Value::String(s))
                 }
             }
+            // Parsed a terminator
             Some(b'e') => {
                 // This is a terminating char
                 Err(miette!("terminator"))
