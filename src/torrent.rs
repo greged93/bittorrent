@@ -1,9 +1,11 @@
+use crate::decode::Decoder;
 use itertools::Itertools;
 use miette::miette;
 use serde_json::{Map, Value};
 use sha1::{Digest, Sha1};
 use std::fmt::Write;
 use std::fmt::{Display, Formatter};
+use std::path::PathBuf;
 
 pub struct Torrent {
     pub(crate) announce: String,
@@ -11,9 +13,26 @@ pub struct Torrent {
 }
 
 impl Torrent {
+    /// Reads the torrent from a file.
+    pub fn read_from_file(path: PathBuf) -> miette::Result<Self> {
+        let file_content = std::fs::read(path).map_err(|_| miette!("failed to read file"))?;
+        let mut decoder = Decoder::new(&file_content);
+
+        let value = decoder
+            .decode()
+            .map_err(|_| miette!("failed to decode file"))?;
+
+        value.try_into()
+    }
+
     /// Returns the info hash of the torrent.
     pub fn info_hash(&self) -> String {
         hex::encode(self.info.hash())
+    }
+
+    /// Returns the raw info hash of the torrent.
+    pub fn raw_info_hash(&self) -> Vec<u8> {
+        self.info.hash()
     }
 
     /// Returns the url encoded info hash.

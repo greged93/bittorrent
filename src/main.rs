@@ -2,12 +2,14 @@ mod decode;
 mod peers;
 mod torrent;
 
-use crate::peers::Peers;
+use crate::peers::{HandShake, Peers};
 use crate::torrent::Torrent;
 use clap::{Parser, Subcommand};
 use decode::Decoder;
 use itertools::Itertools;
+use std::net::SocketAddrV4;
 use std::path::PathBuf;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[derive(Parser)]
 pub struct Cli {
@@ -20,6 +22,7 @@ pub enum Command {
     Decode { input: String },
     Info { path: PathBuf },
     Peers { path: PathBuf },
+    Handshake { path: PathBuf, peer_address: String },
 }
 
 // Usage: your_bittorrent.sh decode "<encoded_value>"
@@ -33,19 +36,11 @@ async fn main() {
             println!("{}", value);
         }
         Command::Info { path } => {
-            let file_content = std::fs::read(path).expect("failed to read file");
-            let mut decoder = Decoder::new(&file_content);
-
-            let value = decoder.decode().expect("expected value");
-            let torrent: Torrent = value.try_into().expect("failed to convert value");
+            let torrent = Torrent::read_from_file(path).expect("failed to read torrent");
             println!("{}", torrent)
         }
         Command::Peers { path } => {
-            let file_content = std::fs::read(path).expect("failed to read file");
-            let mut decoder = Decoder::new(&file_content);
-
-            let value = decoder.decode().expect("expected value");
-            let torrent: Torrent = value.try_into().expect("failed to convert value");
+            let torrent = Torrent::read_from_file(path).expect("failed to read torrent");
 
             let params = [
                 format!("info_hash={}", torrent.url_encoded_info_hash()),
@@ -67,6 +62,32 @@ async fn main() {
             let res = decoder.decode().expect("failed to decode answer");
             let peers: Peers = res.try_into().expect("failed to convert value to peers");
             println!("{}", peers);
+        }
+        Command::Handshake { path, peer_address } => {
+            let torrent = Torrent::read_from_file(path).expect("failed to read torrent");
+
+            let peer = peer_address
+                .parse::<SocketAddrV4>()
+                .expect("failed to parse address");
+            let mut stream = tokio::net::TcpStream::connect(peer)
+                .await
+                .expect("failed to connect to peer");
+
+            let mut handshake =
+                HandShake::new(torrent.raw_info_hash().as_ref(), *b"00112233445566778899");
+            let handshake = &mut handshake as *mut HandShake as *mut [u8; size_of::<HandShake>()];
+            let handshake: &mut [u8; size_of::<HandShake>()] = unsafe { &mut *handshake };
+
+            stream
+                .write_all(handshake)
+                .await
+                .expect("failed to write in stream");
+            stream
+                .read_exact(handshake)
+                .await
+                .expect("failed to read stream");
+
+            println!("Peer ID: {}", hex::encode(&handshake));
         }
     }
 }
