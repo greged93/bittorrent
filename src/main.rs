@@ -7,6 +7,7 @@ use crate::torrent::Torrent;
 use clap::{Parser, Subcommand};
 use decode::Decoder;
 use itertools::Itertools;
+use std::mem::size_of;
 use std::net::SocketAddrV4;
 use std::path::PathBuf;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
