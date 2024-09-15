@@ -35,7 +35,7 @@ impl Info {
             self.name.len(),
             self.name,
             self.piece_length,
-            self.pieces.len(),
+            self.pieces_raw.len(),
         );
         let mut encoded = info.as_bytes().to_vec();
         // extend the slice with the pieces
