@@ -116,7 +116,7 @@ impl Display for Torrent {
             .join("\n");
         write!(
             f,
-            "Tracker URL: {}\nLength: {}\nInfo Hash: {}\nPiece Length: {}\nPiece Hashes:\n{}\n\n",
+            "Tracker URL: {}\nLength: {}\nInfo Hash: {}\nPiece Length: {}\nPiece Hashes:\n{}",
             self.announce,
             self.info.length,
             hex::encode(self.info.hash()),
