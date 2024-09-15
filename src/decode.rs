@@ -1,6 +1,5 @@
 use miette::{miette, LabeledSpan, Result};
 use serde_json::{Map, Number, Value};
-use std::fmt::Write;
 use std::str::FromStr;
 
 #[macro_export]
@@ -106,10 +105,7 @@ impl<'a> Decoder<'a> {
                     Ok(Value::String(s.to_string()))
                 } else {
                     // If the string is not a valid utf8 string, we read it as a hex string
-                    let s = bytes.iter().fold(String::new(), |mut output, b| {
-                        let _ = write!(output, "{b:02X}");
-                        output
-                    });
+                    let s = hex::encode(bytes);
                     Ok(Value::String(s))
                 }
             }

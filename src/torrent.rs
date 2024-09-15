@@ -2,24 +2,47 @@ use itertools::Itertools;
 use miette::miette;
 use serde_json::{Map, Value};
 use sha1::{Digest, Sha1};
+use std::fmt::Write;
 use std::fmt::{Display, Formatter};
 
 pub struct Torrent {
-    announce: String,
-    info: Info,
+    pub(crate) announce: String,
+    pub(crate) info: Info,
+}
+
+impl Torrent {
+    /// Returns the info hash of the torrent.
+    pub fn info_hash(&self) -> String {
+        hex::encode(self.info.hash())
+    }
+
+    /// Returns the url encoded info hash.
+    pub fn url_encoded_info_hash(&self) -> String {
+        self.info_hash()
+            .chars()
+            .chunks(2)
+            .into_iter()
+            .map(|chunk| {
+                chunk.fold(String::from("%"), |mut output, c| {
+                    let _ = write!(output, "{c}");
+                    output
+                })
+            })
+            .collect()
+    }
 }
 
 pub struct Info {
-    length: usize,
-    name: String,
-    piece_length: usize,
-    pieces_raw: Vec<u8>,
-    pieces: String,
+    pub(crate) length: usize,
+    pub(crate) name: String,
+    pub(crate) piece_length: usize,
+    pub(crate) pieces_raw: Vec<u8>,
+    pub(crate) pieces: String,
 }
 
 impl Info {
     /// Returns the sha-1 hash of the information.
-    pub fn hash(&self) -> Vec<u8> {
+    fn hash(&self) -> Vec<u8> {
         let bytes = self.encode();
         let mut hasher = Sha1::new();
         hasher.update(bytes);
@@ -81,15 +104,7 @@ impl TryFrom<Value> for Torrent {
         // Reconstruct pieces from the hex string
         // by taking 2 chars and converting them to a byte
         let pieces = as_str(info, "pieces")?;
-        let pieces_raw = pieces
-            .as_bytes()
-            .chunks(2)
-            .filter_map(|x| {
-                std::str::from_utf8(x)
-                    .ok()
-                    .and_then(|s| u8::from_str_radix(s, 16).ok())
-            })
-            .collect();
+        let pieces_raw = hex::decode(&pieces).map_err(|_| miette!("decoding error"))?;
 
         Ok(Self {
             announce,
