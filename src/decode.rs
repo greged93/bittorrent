@@ -17,13 +17,13 @@ macro_rules! value {
 }
 
 pub struct Decoder<'a> {
-    full: &'a str,
-    cursor: &'a str,
+    full: &'a [u8],
+    cursor: &'a [u8],
 }
 
 impl<'a> Decoder<'a> {
     /// Returns an [`Decoder`]
-    pub fn new(input: &'a str) -> Self {
+    pub fn new(input: &'a [u8]) -> Self {
         Self {
             full: input,
             cursor: input,
@@ -33,10 +33,9 @@ impl<'a> Decoder<'a> {
     /// BenDecode the provided str and advance by the amount of
     /// tokens found.
     pub fn decode(&mut self) -> Result<Value> {
-        let mut chars = self.cursor.chars().peekable();
-        let peeked = chars.peek().ok_or(miette!("EOF"))?;
+        let peeked = self.cursor.first();
         match peeked {
-            'd' => {
+            Some(b'd') => {
                 self.advance_one();
                 let mut map = Map::new();
                 while let Ok(key) = self.decode() {
@@ -45,13 +44,14 @@ impl<'a> Decoder<'a> {
                         .as_str()
                         .ok_or(miette!("expected string as key"))?
                         .to_string();
+                    dbg!(&key, &value);
                     map.insert(key, value);
                 }
                 self.assert_next_terminator()?;
                 self.advance_one();
                 Ok(Value::Object(map))
             }
-            'l' => {
+            Some(b'l') => {
                 self.advance_one();
                 let mut values = vec![];
                 while let Ok(decoded) = self.decode() {
@@ -62,8 +62,8 @@ impl<'a> Decoder<'a> {
                 let arr = Value::Array(values);
                 Ok(arr)
             }
-            'i' => {
-                let delimiter_pos = self.cursor.find('e').ok_or(
+            Some(b'i') => {
+                let delimiter_pos = self.cursor.iter().position(|x| x == &b'e').ok_or(
                     miette!(
                         labels = vec![LabeledSpan::at_offset(
                             self.full.len() - self.cursor.len(),
@@ -71,16 +71,17 @@ impl<'a> Decoder<'a> {
                         )],
                         "expected closing e",
                     )
-                    .with_source_code(self.full.to_string()),
+                    .with_source_code(self.full.to_vec()),
                 )?;
                 let string = &self.cursor[1..delimiter_pos];
                 self.advance_n(delimiter_pos + 1);
                 Ok(Value::Number(
-                    Number::from_str(string).map_err(|_| miette!("cannot convert to number"))?,
+                    Number::from_str(&String::from_utf8_lossy(string))
+                        .map_err(|_| miette!("cannot convert to number"))?,
                 ))
             }
-            c if c.is_ascii_digit() => {
-                let delimiter_pos = self.cursor.find(':').ok_or(
+            Some(c) if c.is_ascii_digit() => {
+                let delimiter_pos = self.cursor.iter().position(|x| x == &b':').ok_or(
                     miette!(
                         labels = vec![LabeledSpan::at_offset(
                             self.full.len() - self.cursor.len(),
@@ -88,27 +89,31 @@ impl<'a> Decoder<'a> {
                         )],
                         "expected closing :",
                     )
-                    .with_source_code(self.full.to_string()),
+                    .with_source_code(self.full.to_vec()),
                 )?;
-                let string_len = self.cursor[..delimiter_pos]
+                let str: String = self.cursor[..delimiter_pos]
+                    .iter()
+                    .map(|x| *x as char)
+                    .collect();
+                let string_len = str
                     .parse::<usize>()
                     .map_err(|_| miette!("cannot convert to string"))?;
                 let string = &self.cursor[delimiter_pos + 1..delimiter_pos + 1 + string_len];
 
                 self.advance_n(delimiter_pos + 1 + string_len);
-                Ok(Value::String(string.to_string()))
+                Ok(Value::String(String::from_utf8_lossy(string).to_string()))
             }
-            'e' => {
+            Some(b'e') => {
                 // This is a terminating char
                 Err(miette!("terminator"))
             }
-            _ => unimplemented!("not implemented yet"),
+            _ => Err(miette!("unhandled char")),
         }
     }
 
     /// Returns an error if the char at the cursor isn't an 'e'.
     fn assert_next_terminator(&mut self) -> Result<()> {
-        if !self.cursor.starts_with('e') {
+        if !self.cursor.starts_with(b"e") {
             return Err(miette!(
                 labels = vec![LabeledSpan::at_offset(
                     self.full.len() - self.cursor.len() - 1,
@@ -116,7 +121,7 @@ impl<'a> Decoder<'a> {
                 )],
                 "expected closing e",
             )
-            .with_source_code(self.full.to_string()));
+            .with_source_code(self.full.to_vec()));
         }
         Ok(())
     }
@@ -139,59 +144,60 @@ mod tests {
     #[test]
     fn test_parse_string() {
         // Test str
-        let mut decoder = Decoder::new("5:hello");
+        let input = b"5:hello";
+        let mut decoder = Decoder::new(input);
 
         // Start the decoder
         let value = decoder.decode().unwrap();
 
         // Check the result and the str left in the decoder
         assert_eq!(value, value!("hello"));
-        assert_eq!(decoder.cursor, "");
+        assert_eq!(decoder.cursor, b"");
     }
 
     #[test]
     fn test_parse_number() {
         // Test str
-        let mut decoder = Decoder::new("i563e");
+        let mut decoder = Decoder::new(b"i563e");
 
         // Start the decoder
         let value = decoder.decode().unwrap();
 
         // Check the result and the str left in the decoder
         assert_eq!(value, value!(563));
-        assert_eq!(decoder.cursor, "");
+        assert_eq!(decoder.cursor, b"");
     }
 
     #[test]
     fn test_parse_empty_list() {
         // Test str
-        let mut decoder = Decoder::new("le");
+        let mut decoder = Decoder::new(b"le");
 
         // Start the decoder
         let value = decoder.decode().unwrap();
 
         // Check the result and the str left in the decoder
         assert_eq!(value, Value::Array(vec![]));
-        assert_eq!(decoder.cursor, "");
+        assert_eq!(decoder.cursor, b"");
     }
 
     #[test]
     fn test_parse_list_simple() {
         // Test str
-        let mut decoder = Decoder::new("l5:helloi52ee");
+        let mut decoder = Decoder::new(b"l5:helloi52ee");
 
         // Start the decoder
         let value = decoder.decode().unwrap();
 
         // Check the result and the str left in the decoder
         assert_eq!(value, Value::Array(vec![value!("hello"), value!(52)]));
-        assert_eq!(decoder.cursor, "");
+        assert_eq!(decoder.cursor, b"");
     }
 
     #[test]
     fn test_parse_list_complex() {
         // Test str
-        let mut decoder = Decoder::new("lli4eei5ee");
+        let mut decoder = Decoder::new(b"lli4eei5ee");
 
         // Start the decoder
         let value = decoder.decode().unwrap();
@@ -201,13 +207,13 @@ mod tests {
             value,
             Value::Array(vec![Value::Array(vec![value!(4)]), value!(5)])
         );
-        assert_eq!(decoder.cursor, "");
+        assert_eq!(decoder.cursor, b"");
     }
 
     #[test]
     fn test_parse_map_simple() {
         // Test str
-        let mut decoder = Decoder::new("d3:foo3:bar5:helloi52ee");
+        let mut decoder = Decoder::new(b"d3:foo3:bar5:helloi52ee");
 
         // Start the decoder
         let value = decoder.decode().unwrap();
@@ -219,6 +225,6 @@ mod tests {
                 [("foo".into(), value!("bar")), ("hello".into(), value!(52))].into_iter()
             ))
         );
-        assert_eq!(decoder.cursor, "");
+        assert_eq!(decoder.cursor, b"");
     }
 }

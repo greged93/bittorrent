@@ -1,7 +1,10 @@
 mod decode;
+mod torrent;
 
+use crate::torrent::Torrent;
 use clap::{Parser, Subcommand};
 use decode::Decoder;
+use std::path::PathBuf;
 
 #[derive(Parser)]
 pub struct Cli {
@@ -11,7 +14,8 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
-    Decode { input: String },
+    Decode { input: Vec<u8> },
+    Info { path: PathBuf },
 }
 
 // Usage: your_bittorrent.sh decode "<encoded_value>"
@@ -19,10 +23,17 @@ fn main() {
     let command = Cli::parse();
     match command.command {
         Command::Decode { input } => {
-            // Uncomment this block to pass the first stage
             let mut decoder = Decoder::new(&input);
             let value = decoder.decode().expect("expected value");
             println!("{}", value);
+        }
+        Command::Info { path } => {
+            let file_content = std::fs::read(path).expect("failed to read file");
+            let mut decoder = Decoder::new(&file_content);
+
+            let value = decoder.decode().expect("expected value");
+            let torrent: Torrent = value.try_into().expect("failed to convert value");
+            println!("{}", torrent)
         }
     }
 }
