@@ -1,5 +1,6 @@
 use miette::miette;
 use serde_json::{Map, Value};
+use sha1::{Digest, Sha1};
 use std::fmt::{Display, Formatter};
 
 pub struct Torrent {
@@ -11,7 +12,36 @@ pub struct Info {
     length: usize,
     name: String,
     piece_length: usize,
-    pieces: String,
+    pieces: Vec<u8>,
+}
+
+impl Info {
+    /// Returns the sha-1 hash of the information.
+    pub fn hash(&self) -> Vec<u8> {
+        let bytes = self.encode();
+        let mut hasher = Sha1::new();
+        hasher.update(bytes);
+        hasher.finalize().to_vec()
+    }
+
+    /// Encode the information by reconstructing it and converting it to
+    /// a slice u8.
+    fn encode(&self) -> Vec<u8> {
+        let info = format!(
+            "d6:lengthi{}e4:name{}:{}12:piece lengthi{}e6:pieces{}:",
+            self.length,
+            self.name.len(),
+            self.name,
+            self.piece_length,
+            self.pieces.len(),
+        );
+        let mut encoded = info.as_bytes().to_vec();
+        // extend the slice with the pieces
+        encoded.extend(self.pieces.clone());
+        // extend the slice with the terminating e
+        encoded.extend(b"e");
+        encoded
+    }
 }
 
 impl TryFrom<Value> for Torrent {
@@ -46,7 +76,17 @@ impl TryFrom<Value> for Torrent {
         let length = as_usize(info, "length")?;
         let piece_length = as_usize(info, "piece length")?;
         let name = as_str(info, "name")?;
-        let pieces = as_str(info, "pieces")?;
+        // Reconstruct pieces from the hex string
+        // by taking 2 chars and converting them to a byte
+        let pieces = as_str(info, "pieces")?
+            .as_bytes()
+            .chunks(2)
+            .filter_map(|x| {
+                std::str::from_utf8(x)
+                    .ok()
+                    .and_then(|s| u8::from_str_radix(s, 16).ok())
+            })
+            .collect();
 
         Ok(Self {
             announce,
@@ -64,8 +104,10 @@ impl Display for Torrent {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Tracker URL: {}\nLength: {}",
-            self.announce, self.info.length
+            "Tracker URL: {}\nLength: {}\nInfo Hash: {}",
+            self.announce,
+            self.info.length,
+            hex::encode(self.info.hash())
         )
     }
 }

@@ -1,5 +1,6 @@
 use miette::{miette, LabeledSpan, Result};
 use serde_json::{Map, Number, Value};
+use std::fmt::Write;
 use std::str::FromStr;
 
 #[macro_export]
@@ -44,7 +45,6 @@ impl<'a> Decoder<'a> {
                         .as_str()
                         .ok_or(miette!("expected string as key"))?
                         .to_string();
-                    dbg!(&key, &value);
                     map.insert(key, value);
                 }
                 self.assert_next_terminator()?;
@@ -87,21 +87,27 @@ impl<'a> Decoder<'a> {
                             self.full.len() - self.cursor.len(),
                             "here"
                         )],
-                        "expected closing :",
+                        "expected : delimiter",
                     )
                     .with_source_code(self.full.to_vec()),
                 )?;
-                let str: String = self.cursor[..delimiter_pos]
-                    .iter()
-                    .map(|x| *x as char)
-                    .collect();
+                let str = std::str::from_utf8(&self.cursor[..delimiter_pos])
+                    .map_err(|_| miette!("invalid str"))?;
                 let string_len = str
                     .parse::<usize>()
                     .map_err(|_| miette!("cannot convert to string"))?;
-                let string = &self.cursor[delimiter_pos + 1..delimiter_pos + 1 + string_len];
-
+                let bytes = &self.cursor[delimiter_pos + 1..delimiter_pos + 1 + string_len];
                 self.advance_n(delimiter_pos + 1 + string_len);
-                Ok(Value::String(String::from_utf8_lossy(string).to_string()))
+                if let Ok(s) = std::str::from_utf8(bytes) {
+                    Ok(Value::String(s.to_string()))
+                } else {
+                    // If the string is not a valid utf8 string, we read it as a hex string
+                    let s = bytes.iter().fold(String::new(), |mut output, b| {
+                        let _ = write!(output, "{b:02X}");
+                        output
+                    });
+                    Ok(Value::String(s))
+                }
             }
             Some(b'e') => {
                 // This is a terminating char
@@ -223,6 +229,31 @@ mod tests {
             value,
             Value::Object(Map::from_iter(
                 [("foo".into(), value!("bar")), ("hello".into(), value!(52))].into_iter()
+            ))
+        );
+        assert_eq!(decoder.cursor, b"");
+    }
+
+    #[test]
+    fn test_parse_map_complex() {
+        // Test str
+        let mut decoder =
+            Decoder::new(b"d6:lengthi92063e4:name10:sample.txt12:piece lengthi32768e6:pieces1:ae");
+
+        // Start the decoder
+        let value = decoder.decode().unwrap();
+
+        // Check the result and the str left in the decoder
+        assert_eq!(
+            value,
+            Value::Object(Map::from_iter(
+                [
+                    ("length".into(), value!(92063)),
+                    ("name".into(), value!("sample.txt")),
+                    ("piece length".into(), value!(32768)),
+                    ("pieces".into(), value!("a")),
+                ]
+                .into_iter()
             ))
         );
         assert_eq!(decoder.cursor, b"");
