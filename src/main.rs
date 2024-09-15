@@ -8,7 +8,6 @@ use clap::{Parser, Subcommand};
 use decode::Decoder;
 use itertools::Itertools;
 use std::mem::size_of;
-use std::net::SocketAddrV4;
 use std::path::PathBuf;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -67,10 +66,7 @@ async fn main() {
         Command::Handshake { path, peer_address } => {
             let torrent = Torrent::read_from_file(path).expect("failed to read torrent");
 
-            let peer = peer_address
-                .parse::<SocketAddrV4>()
-                .expect("failed to parse address");
-            let mut stream = tokio::net::TcpStream::connect(peer)
+            let mut stream = tokio::net::TcpStream::connect(peer_address)
                 .await
                 .expect("failed to connect to peer");
 
@@ -88,7 +84,8 @@ async fn main() {
                 .await
                 .expect("failed to read stream");
 
-            println!("Peer ID: {}", hex::encode(&handshake));
+            let offset = size_of::<HandShake>() - 20;
+            println!("Peer ID: {}", hex::encode(&handshake[offset..]));
         }
     }
 }
