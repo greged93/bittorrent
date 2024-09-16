@@ -1,10 +1,50 @@
+use crate::decode::Decoder;
+use crate::torrent::Torrent;
 use itertools::Itertools;
 use miette::miette;
+use serde::Serialize;
 use serde_json::Value;
 use std::fmt::{Display, Formatter};
 
 /// The peers in the network.
 pub struct Peers(Vec<String>);
+
+#[derive(Serialize)]
+struct PeersQueryParams {
+    peer_id: String,
+    port: String,
+    uploaded: u32,
+    downloaded: u32,
+    left: u32,
+    compact: u8,
+}
+
+impl Peers {
+    /// Get peers for the provided torrent.
+    pub async fn get_peers(torrent: Torrent) -> miette::Result<Self> {
+        let params = PeersQueryParams {
+            peer_id: "00112233445566778899".to_string(),
+            port: "6881".to_string(),
+            uploaded: 0,
+            downloaded: 0,
+            left: torrent.info.length as u32,
+            compact: 0,
+        };
+        let info_hash = torrent.url_encoded_info_hash();
+        let encoded_params = serde_urlencoded::to_string(&params).map_err(|err| miette!(err))?;
+        let encoded_params = format!("{}&info_hash={}", encoded_params, info_hash);
+
+        let url = format!("{}?{}", torrent.announce, encoded_params);
+
+        let res = reqwest::get(url).await.map_err(|err| miette!(err))?;
+        let raw_res = res.bytes().await.map_err(|err| miette!(err))?;
+
+        let mut decoder = Decoder::new(raw_res.as_ref());
+        let res = decoder.decode()?;
+
+        res.try_into()
+    }
+}
 
 impl Display for Peers {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -19,47 +59,25 @@ impl TryFrom<Value> for Peers {
     type Error = miette::Error;
 
     fn try_from(value: Value) -> miette::Result<Self> {
-        let map = value.as_object().ok_or(miette!("expected object"))?;
+        let map = value.as_object().ok_or(miette!("expected obj"))?;
 
         let peers = map.get("peers").ok_or(miette!("missing peers key"))?;
-        let peers = peers.as_str().ok_or(miette!("expected str for peers"))?;
-        let peers = hex::decode(peers).map_err(|_| miette!("failed decoding peers hex str"))?;
+        let peers = peers.as_array().ok_or(miette!("expected arr for peers"))?;
 
-        let peers = peers
-            .chunks(6)
-            .filter_map(|peer| {
-                let ip = &peer[..4].iter().map(|b| format!("{b}")).join(".");
-                let port = format!(
-                    "{}",
-                    u32::from_str_radix(&hex::encode(&peer[4..]), 16).ok()?
-                );
-                Some(format!("{ip}:{port}"))
-            })
-            .collect::<Vec<_>>();
-        Ok(Peers(peers))
-    }
-}
-
-/// The handshake data for the TCP connection
-/// with the bit torrent protocol.
-#[repr(C)]
-pub struct HandShake {
-    length: u8,
-    protocol: [u8; 19],
-    reserved: [u8; 8],
-    info_hash: [u8; 20],
-    peer_id: [u8; 20],
-}
-
-impl HandShake {
-    /// Construct a [`HandShake`]
-    pub fn new(info_hash: &[u8], peer_id: [u8; 20]) -> Self {
-        Self {
-            length: 19,
-            protocol: *b"BitTorrent protocol",
-            reserved: [0u8; 8],
-            info_hash: info_hash.try_into().expect("failed to convert info hash"),
-            peer_id,
+        let mut addresses = Vec::new();
+        for peer in peers {
+            let peer = peer.as_object().ok_or(miette!("expected obj for peer"))?;
+            let ip = peer
+                .get("ip")
+                .and_then(|x| x.as_str())
+                .ok_or(miette!("expected str for ip"))?;
+            let port = peer
+                .get("port")
+                .and_then(|x| x.as_u64())
+                .ok_or(miette!("expected str for port"))?;
+            addresses.push(format!("{ip}:{port}"))
         }
+
+        Ok(Peers(addresses))
     }
 }
