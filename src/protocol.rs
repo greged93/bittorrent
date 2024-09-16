@@ -1,6 +1,7 @@
 use crate::handshake::HandShake;
 use crate::torrent::Torrent;
 use miette::miette;
+use std::mem::size_of;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 const MY_PEER_ID: [u8; 20] = *b"00112233445566778899";
