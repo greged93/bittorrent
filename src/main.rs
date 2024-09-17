@@ -32,6 +32,7 @@ pub enum Command {
         path: PathBuf,
         peer_address: String,
     },
+    #[clap(name = "download_piece")]
     DownloadPiece {
         #[clap(short)]
         output: Option<PathBuf>,
