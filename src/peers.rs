@@ -1,5 +1,6 @@
 use crate::decode::Decoder;
 use crate::torrent::Torrent;
+use itertools::Itertools;
 use miette::miette;
 use serde::Serialize;
 use serde_json::Value;
@@ -56,27 +57,22 @@ impl Display for Peers {
 
 impl TryFrom<Value> for Peers {
     type Error = miette::Error;
-
     fn try_from(value: Value) -> miette::Result<Self> {
-        let map = value.as_object().ok_or(miette!("expected obj"))?;
-
+        let map = value.as_object().ok_or(miette!("expected object"))?;
         let peers = map.get("peers").ok_or(miette!("missing peers key"))?;
-        let peers = peers.as_array().ok_or(miette!("expected arr for peers"))?;
-
-        let mut addresses = Vec::new();
-        for peer in peers {
-            let peer = peer.as_object().ok_or(miette!("expected obj for peer"))?;
-            let ip = peer
-                .get("ip")
-                .and_then(|x| x.as_str())
-                .ok_or(miette!("expected str for ip"))?;
-            let port = peer
-                .get("port")
-                .and_then(|x| x.as_u64())
-                .ok_or(miette!("expected str for port"))?;
-            addresses.push(format!("{ip}:{port}"))
-        }
-
-        Ok(Peers(addresses))
+        let peers = peers.as_str().ok_or(miette!("expected str for peers"))?;
+        let peers = hex::decode(peers).map_err(|_| miette!("failed decoding peers hex str"))?;
+        let peers = peers
+            .chunks(6)
+            .filter_map(|peer| {
+                let ip = &peer[..4].iter().map(|b| format!("{b}")).join(".");
+                let port = format!(
+                    "{}",
+                    u32::from_str_radix(&hex::encode(&peer[4..]), 16).ok()?
+                );
+                Some(format!("{ip}:{port}"))
+            })
+            .collect::<Vec<_>>();
+        Ok(Peers(peers))
     }
 }
