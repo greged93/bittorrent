@@ -103,21 +103,27 @@ async fn main() {
 
             // Request each full piece
             let mut file = Vec::with_capacity(torrent.info.piece_length as usize);
-            for (i, _) in (0..torrent.info.piece_length / SIXTEEN_KILO_BYTES).enumerate() {
+            let full = torrent.info.length / torrent.info.piece_length;
+
+            // The piece length will be torrent.info.piece_length if the index of the
+            // piece isn't the last one, or torrent.info.length % torrent.info.piece_length
+            let piece_len = if index == full {
+                torrent.info.length % torrent.info.piece_length
+            } else {
+                torrent.info.piece_length
+            };
+
+            // Request all full pieces
+            for i in 0..piece_len / SIXTEEN_KILO_BYTES {
                 stream
-                    .request_piece(
-                        index,
-                        (i as u32) * SIXTEEN_KILO_BYTES,
-                        SIXTEEN_KILO_BYTES,
-                        &mut file,
-                    )
+                    .request_piece(index, i * SIXTEEN_KILO_BYTES, SIXTEEN_KILO_BYTES, &mut file)
                     .await
                     .expect("failed to request piece");
             }
 
             // Request the last piece
-            let size = torrent.info.piece_length % SIXTEEN_KILO_BYTES;
-            let offset = torrent.info.piece_length - size;
+            let size = piece_len % SIXTEEN_KILO_BYTES;
+            let offset = piece_len - size;
             stream
                 .request_piece(index, offset, size, &mut file)
                 .await
