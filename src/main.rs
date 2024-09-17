@@ -5,7 +5,7 @@ mod protocol;
 mod torrent;
 
 use crate::peers::Peers;
-use crate::protocol::{BitTorrentStream, SIXTEEN_KILO_BYTES};
+use crate::protocol::BitTorrentStream;
 use crate::torrent::Torrent;
 use clap::{Parser, Subcommand};
 use decode::Decoder;
@@ -84,55 +84,9 @@ async fn main() {
                 .expect("failed to get peers");
             let peer = peers.0.first().expect("no peers");
 
-            // Perform handshake
-            let mut stream = BitTorrentStream::new(peer).await;
-            stream.handshake(&torrent).await.expect("handshake failed");
-
-            // Wait for the bitfield
-            stream
-                .wait_message(5)
+            let file = BitTorrentStream::connect_and_request_piece(peer, &torrent, index)
                 .await
-                .expect("missing bitfield message");
-
-            // Send an interested message
-            stream
-                .send_message(2, vec![])
-                .await
-                .expect("failed to send interested");
-
-            // Wait for an unchoke message
-            stream
-                .wait_message(1)
-                .await
-                .expect("failed to get unchoke message");
-
-            // Request each full piece
-            let mut file = Vec::with_capacity(torrent.info.piece_length as usize);
-            let full = torrent.info.length / torrent.info.piece_length;
-
-            // The piece length will be torrent.info.piece_length if the index of the
-            // piece isn't the last one, or torrent.info.length % torrent.info.piece_length
-            let piece_len = if index == full {
-                torrent.info.length % torrent.info.piece_length
-            } else {
-                torrent.info.piece_length
-            };
-
-            // Request all full pieces
-            for i in 0..piece_len / SIXTEEN_KILO_BYTES {
-                stream
-                    .request_piece(index, i * SIXTEEN_KILO_BYTES, SIXTEEN_KILO_BYTES, &mut file)
-                    .await
-                    .expect("failed to request piece");
-            }
-
-            // Request the last piece
-            let size = piece_len % SIXTEEN_KILO_BYTES;
-            let offset = piece_len - size;
-            stream
-                .request_piece(index, offset, size, &mut file)
-                .await
-                .expect("failed to request piece");
+                .expect("failed to get piece");
 
             if let Some(path) = output {
                 std::fs::write(&path, file).expect("failed to write file");
@@ -145,57 +99,31 @@ async fn main() {
             let peers = Peers::get_peers(&torrent)
                 .await
                 .expect("failed to get peers");
-            let peer = peers.0.first().expect("no peers");
-
-            // Perform handshake
-            let mut stream = BitTorrentStream::new(peer).await;
-            stream.handshake(&torrent).await.expect("handshake failed");
-
-            // Wait for the bitfield
-            stream
-                .wait_message(5)
-                .await
-                .expect("missing bitfield message");
-
-            // Send an interested message
-            stream
-                .send_message(2, vec![])
-                .await
-                .expect("failed to send interested");
-
-            // Wait for an unchoke message
-            stream
-                .wait_message(1)
-                .await
-                .expect("failed to get unchoke message");
-
-            // Request each full piece
-            let mut file = Vec::with_capacity(torrent.info.length as usize);
             let full = torrent.info.length / torrent.info.piece_length;
-            for index in 0..=full {
-                // The piece length will be torrent.info.piece_length if the index of the
-                // piece isn't the last one, or torrent.info.length % torrent.info.piece_length
-                let piece_len = if index == full {
-                    torrent.info.length % torrent.info.piece_length
-                } else {
-                    torrent.info.piece_length
-                };
 
-                // Request all full pieces
-                for i in 0..piece_len / SIXTEEN_KILO_BYTES {
-                    stream
-                        .request_piece(index, i * SIXTEEN_KILO_BYTES, SIXTEEN_KILO_BYTES, &mut file)
-                        .await
-                        .expect("failed to request piece");
-                }
+            // Split the indexes in chunks of peers, otherwise you risk
+            // hitting a "Peer connection reset" issue.
+            let indexes: Vec<u32> = (0..=full).collect();
+            let peers_len = peers.0.len();
+            let indexes = indexes.chunks(peers_len).collect::<Vec<_>>();
+            let mut file = Vec::with_capacity(torrent.info.length as usize);
 
-                // Request the last piece
-                let size = piece_len % SIXTEEN_KILO_BYTES;
-                let offset = piece_len - size;
-                stream
-                    .request_piece(index, offset, size, &mut file)
+            // Create an iterator of futures which poll all available peers
+            // for the torrent file.
+            for group in indexes {
+                let futs = group
+                    .iter()
+                    .zip(peers.0.iter().cycle())
+                    .map(|(index, peer)| {
+                        BitTorrentStream::connect_and_request_piece(peer, &torrent, *index)
+                    });
+                let pieces = futures::future::join_all(futs)
                     .await
-                    .expect("failed to request piece");
+                    .into_iter()
+                    .collect::<Result<Vec<Vec<u8>>, _>>()
+                    .expect("failed to collect pieces");
+
+                pieces.into_iter().for_each(|mut p| file.append(&mut p));
             }
 
             if let Some(path) = output {

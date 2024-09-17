@@ -21,6 +21,66 @@ impl BitTorrentStream {
         )
     }
 
+    /// Connect to the tcp stream and request the torrent piece for the
+    /// provided index.
+    pub async fn connect_and_request_piece(
+        address: &str,
+        torrent: &Torrent,
+        index: u32,
+    ) -> miette::Result<Vec<u8>> {
+        // Perform handshake
+        let mut stream = BitTorrentStream::new(&address).await;
+        stream.handshake(&torrent).await.expect("handshake failed");
+
+        // Wait for the bitfield
+        stream
+            .wait_message(5)
+            .await
+            .expect("missing bitfield message");
+
+        // Send an interested message
+        stream
+            .send_message(2, vec![])
+            .await
+            .expect("failed to send interested");
+
+        // Wait for an unchoke message
+        stream
+            .wait_message(1)
+            .await
+            .expect("failed to get unchoke message");
+
+        // Request each full piece
+        let mut file = Vec::with_capacity(torrent.info.piece_length as usize);
+        let full = torrent.info.length / torrent.info.piece_length;
+
+        // The piece length will be torrent.info.piece_length if the index of the
+        // piece isn't the last one, or torrent.info.length % torrent.info.piece_length
+        let piece_len = if index == full {
+            torrent.info.length % torrent.info.piece_length
+        } else {
+            torrent.info.piece_length
+        };
+
+        // Request all full pieces
+        for i in 0..piece_len / SIXTEEN_KILO_BYTES {
+            stream
+                .request_piece(index, i * SIXTEEN_KILO_BYTES, SIXTEEN_KILO_BYTES, &mut file)
+                .await
+                .expect("failed to request piece");
+        }
+
+        // Request the last piece
+        let size = piece_len % SIXTEEN_KILO_BYTES;
+        let offset = piece_len - size;
+        stream
+            .request_piece(index, offset, size, &mut file)
+            .await
+            .expect("failed to request piece");
+
+        Ok(file)
+    }
+
     /// Handshakes with the peer for the provided torrent.
     pub async fn handshake(&mut self, torrent: &Torrent) -> miette::Result<()> {
         let mut handshake = HandShake::new(torrent.raw_info_hash().as_ref(), MY_PEER_ID);
