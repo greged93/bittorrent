@@ -39,6 +39,11 @@ pub enum Command {
         input: PathBuf,
         index: u32,
     },
+    Download {
+        #[clap(short)]
+        output: Option<PathBuf>,
+        input: PathBuf,
+    },
 }
 
 // Usage: your_bittorrent.sh decode "<encoded_value>"
@@ -52,18 +57,18 @@ async fn main() {
             println!("{}", value);
         }
         Command::Info { path } => {
-            let torrent = Torrent::read_from_file(path).expect("failed to read torrent");
+            let torrent = Torrent::read_from_file(&path).expect("failed to read torrent");
             println!("{}", torrent)
         }
         Command::Peers { path } => {
-            let torrent = Torrent::read_from_file(path).expect("failed to read torrent");
+            let torrent = Torrent::read_from_file(&path).expect("failed to read torrent");
             let peers = Peers::get_peers(&torrent)
                 .await
                 .expect("failed to get peers");
             println!("{}", peers);
         }
         Command::Handshake { path, peer_address } => {
-            let torrent = Torrent::read_from_file(path).expect("failed to read torrent");
+            let torrent = Torrent::read_from_file(&path).expect("failed to read torrent");
             let mut stream = BitTorrentStream::new(&peer_address).await;
             stream.handshake(&torrent).await.unwrap();
         }
@@ -73,7 +78,7 @@ async fn main() {
             output,
         } => {
             // Get peers
-            let torrent = Torrent::read_from_file(input).expect("failed to read torrent");
+            let torrent = Torrent::read_from_file(&input).expect("failed to read torrent");
             let peers = Peers::get_peers(&torrent)
                 .await
                 .expect("failed to get peers");
@@ -132,6 +137,70 @@ async fn main() {
             if let Some(path) = output {
                 std::fs::write(&path, file).expect("failed to write file");
                 println!("Piece {index} downloaded to {path:?}");
+            }
+        }
+        Command::Download { input, output } => {
+            // Get peers
+            let torrent = Torrent::read_from_file(&input).expect("failed to read torrent");
+            let peers = Peers::get_peers(&torrent)
+                .await
+                .expect("failed to get peers");
+            let peer = peers.0.first().expect("no peers");
+
+            // Perform handshake
+            let mut stream = BitTorrentStream::new(peer).await;
+            stream.handshake(&torrent).await.expect("handshake failed");
+
+            // Wait for the bitfield
+            stream
+                .wait_message(5)
+                .await
+                .expect("missing bitfield message");
+
+            // Send an interested message
+            stream
+                .send_message(2, vec![])
+                .await
+                .expect("failed to send interested");
+
+            // Wait for an unchoke message
+            stream
+                .wait_message(1)
+                .await
+                .expect("failed to get unchoke message");
+
+            // Request each full piece
+            let mut file = Vec::with_capacity(torrent.info.length as usize);
+            let full = torrent.info.length / torrent.info.piece_length;
+            for index in 0..=full {
+                // The piece length will be torrent.info.piece_length if the index of the
+                // piece isn't the last one, or torrent.info.length % torrent.info.piece_length
+                let piece_len = if index == full {
+                    torrent.info.length % torrent.info.piece_length
+                } else {
+                    torrent.info.piece_length
+                };
+
+                // Request all full pieces
+                for i in 0..piece_len / SIXTEEN_KILO_BYTES {
+                    stream
+                        .request_piece(index, i * SIXTEEN_KILO_BYTES, SIXTEEN_KILO_BYTES, &mut file)
+                        .await
+                        .expect("failed to request piece");
+                }
+
+                // Request the last piece
+                let size = piece_len % SIXTEEN_KILO_BYTES;
+                let offset = piece_len - size;
+                stream
+                    .request_piece(index, offset, size, &mut file)
+                    .await
+                    .expect("failed to request piece");
+            }
+
+            if let Some(path) = output {
+                std::fs::write(&path, file).expect("failed to write file");
+                println!("Downloaded {input:?} to {path:?}.");
             }
         }
     }

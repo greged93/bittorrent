@@ -14,7 +14,7 @@ pub struct Torrent {
 
 impl Torrent {
     /// Reads the torrent from a file.
-    pub fn read_from_file(path: PathBuf) -> miette::Result<Self> {
+    pub fn read_from_file(path: &PathBuf) -> miette::Result<Self> {
         let file_content = std::fs::read(path).map_err(|_| miette!("failed to read file"))?;
         let mut decoder = Decoder::new(&file_content);
 
