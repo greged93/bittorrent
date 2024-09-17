@@ -32,6 +32,7 @@ impl Peers {
         let info_hash = torrent.url_encoded_info_hash();
         let encoded_params = serde_urlencoded::to_string(&params).map_err(|err| miette!(err))?;
         let encoded_params = format!("{}&info_hash={}", encoded_params, info_hash);
+        dbg!(encoded_params);
 
         let url = format!("{}?{}", torrent.announce, encoded_params);
 
