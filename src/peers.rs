@@ -26,7 +26,7 @@ impl Peers {
             port: "6881".to_string(),
             uploaded: 0,
             downloaded: 0,
-            left: torrent.info.length as u32,
+            left: torrent.info.length,
             compact: 0,
         };
         let info_hash = torrent.url_encoded_info_hash();
@@ -40,6 +40,7 @@ impl Peers {
 
         let mut decoder = Decoder::new(raw_res.as_ref());
         let res = decoder.decode()?;
+        dbg!(&res);
 
         res.try_into()
     }
