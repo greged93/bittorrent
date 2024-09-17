@@ -1,13 +1,12 @@
 use crate::decode::Decoder;
 use crate::torrent::Torrent;
-use itertools::Itertools;
 use miette::miette;
 use serde::Serialize;
 use serde_json::Value;
 use std::fmt::{Display, Formatter};
 
 /// The peers in the network.
-pub struct Peers(Vec<String>);
+pub struct Peers(pub(crate) Vec<String>);
 
 #[derive(Serialize)]
 struct PeersQueryParams {
@@ -21,7 +20,7 @@ struct PeersQueryParams {
 
 impl Peers {
     /// Get peers for the provided torrent.
-    pub async fn get_peers(torrent: Torrent) -> miette::Result<Self> {
+    pub async fn get_peers(torrent: &Torrent) -> miette::Result<Self> {
         let params = PeersQueryParams {
             peer_id: "00112233445566778899".to_string(),
             port: "6881".to_string(),

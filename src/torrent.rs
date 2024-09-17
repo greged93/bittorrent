@@ -52,9 +52,9 @@ impl Torrent {
 }
 
 pub struct Info {
-    pub(crate) length: usize,
+    pub(crate) length: u32,
     pub(crate) name: String,
-    pub(crate) piece_length: usize,
+    pub(crate) piece_length: u32,
     pub(crate) pieces_raw: Vec<u8>,
     pub(crate) pieces: String,
 }
@@ -101,13 +101,13 @@ impl TryFrom<Value> for Torrent {
                 .ok_or(miette!("expected str"))
                 .map(|x| x.to_string())
         }
-        fn as_usize(object: &Map<String, Value>, key: &str) -> miette::Result<usize> {
+        fn as_u32(object: &Map<String, Value>, key: &str) -> miette::Result<u32> {
             object
                 .get(key)
                 .ok_or(miette!("expected {key} field"))?
                 .as_u64()
                 .ok_or(miette!("expected usize"))
-                .map(|x| x as usize)
+                .map(|x| x as u32)
         }
 
         let announce = as_str(object, "announce")?;
@@ -117,8 +117,8 @@ impl TryFrom<Value> for Torrent {
             .ok_or(miette!("expected announce field"))?
             .as_object()
             .ok_or(miette!("expected object"))?;
-        let length = as_usize(info, "length")?;
-        let piece_length = as_usize(info, "piece length")?;
+        let length = as_u32(info, "length")?;
+        let piece_length = as_u32(info, "piece length")?;
         let name = as_str(info, "name")?;
         // Reconstruct pieces from the hex string
         // by taking 2 chars and converting them to a byte
